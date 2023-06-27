@@ -1,10 +1,12 @@
 view: repeat_caller_flag {
   derived_table: {
-    sql: with flowname_group as (SELECT session_id, phone_number,flow_name, min(request_time) as request_time
-            FROM `qai-insurance-health-prod.ccai_dataset_bigquery.dialogflow_bigquery_export_data_cleaned`
+    sql: with flowname_group as (SELECT A.session_id, A.phone_number,A.flow_name, min(A.request_time) as request_time , B.Is_agent_transfer
+            FROM `qai-insurance-health-prod.ccai_dataset_bigquery.dialogflow_bigquery_export_data_cleaned` as A
+            left join `qai-insurance-health-prod.ccai_dataset_bigquery.ccai_session_data` as B
+            on A.session_id = B.session_ID
             where phone_number is not null and flow_name is not null
             --and {% condition request_date %} request_time {% endcondition %}
-            group by session_id,phone_number,flow_name
+            group by session_id,phone_number,flow_name,Is_agent_transfer
             order by session_id,phone_number,flow_name),
             ---Creating a new column next_timestamp which is next in partition group for timestamp difference
             flowname_lead as (
@@ -17,13 +19,14 @@ view: repeat_caller_flag {
             repeat_caller as(select
             flowname_lead.*,
             max(case when timestamp_diff(request_time, next_timestamp, hour)<=24 then 1 else 0 end) over (partition by phone_number) as repeat_call_flag
-            randbetween(0,1) as repeat_call_flag -- dummy query to generate data
+            --randbetween(0,1) as repeat_call_flag -- dummy query to generate data
             from flowname_lead)
             select
             repeat_caller.session_id,
             repeat_caller.phone_number,
             repeat_caller.flow_name,
             repeat_caller.request_time,
+            repeat_caller.Is_agent_transfer,
             --repeat_caller.date,
             repeat_caller.repeat_call_flag
             from repeat_caller
@@ -38,6 +41,11 @@ view: repeat_caller_flag {
   dimension: session_id {
     type: string
     sql: ${TABLE}.session_id ;;
+  }
+
+  dimension: Is_agent_transfer {
+    type: number
+    sql: ${TABLE}.Is_agent_transfer ;;
   }
 
   dimension: phone_number {
@@ -74,7 +82,8 @@ view: repeat_caller_flag {
   measure: average_repeat_call_flag {
     type: average_distinct
     sql_distinct_key: ${phone_number} ;;
-    sql: ${repeat_call_flag} ;;
+    # sql: ${repeat_call_flag} ;;
+    sql: ${Is_agent_transfer} ;;
     value_format: "0.00%"
   }
 
